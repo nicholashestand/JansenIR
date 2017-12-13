@@ -22,13 +22,26 @@ volatile sig_atomic_t interrupted=false;
 int main(int argc, char *argv[])
 {
 
+    // start mpi
+    int ierr, nproc, rank, istart, iend;
+    ierr = MPI_Init(&argc, &argv);
+    if ( ierr != MPI_SUCCESS )
+    {
+        printf("Error starting MPI. Aborting...\n");
+        MPI_Abort(MPI_COMM_WORLD, ierr);
+    }
+
+    MPI_Comm_size( MPI_COMM_WORLD, &nproc );
+    MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
     // Some help for starting the program. User must supply a single argument
     if ( argc != 2 ){
-        printf("Usage:\n"
-               "\tInclude as the first argument either the name of an input file,  or a checkpoint\n"
-               "\tfile with extension '.cpt' if restarting the calculation. No other arguments are\n"
-               "\tallowed.\n");
-        exit(EXIT_FAILURE);   
+        mpiprintf("Usage:\n"
+                  "\tInclude as the first argument either the name of an input file,  or a checkpoint\n"
+                  "\tfile with extension '.cpt' if restarting the calculation. No other arguments are\n"
+                  "\tallowed.\n");
+        MPI_Finalize();
+        exit(EXIT_SUCCESS);
     }
 
 
@@ -41,7 +54,7 @@ int main(int argc, char *argv[])
     // ***              Variable Declaration            *** //
     // **************************************************** //
 
-    printf("\n>>> Setting default parameters\n");
+    mpiprintf("\n>>> Setting default parameters\n");
 
     // Model parameters
     char          gmxf[MAX_STR_LEN]; strncpy( gmxf, " ", MAX_STR_LEN );   // trajectory file
@@ -71,48 +84,51 @@ int main(int argc, char *argv[])
     {
         // START FROM INPUT FILE
         ir_init( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, &cplCut, &maxCouple );
+                &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, &cplCut, &maxCouple, rank );
     }
     else
     {
         // START FROM CHECKPOINT FILE
+        /*
         checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
                     &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, 0, NULL, NULL, NULL, NULL, 
                     NULL, NULL, &cplCut, &maxCouple, CP_INIT );
+                    */
     }
 
 
     // Print the parameters to stdout
-    printf("\tSetting xtc file %s\n",                       gmxf        );
-    printf("\tSetting output file name to %s\n",            outf        );
-    printf("\tSetting cpt file %s\n",                       cptf        );
-    printf("\tSetting model to %s\n",                       model       );
-    printf("\tSetting the number of tcf points to %d\n",    ntcfpoints  );
-    printf("\tSetting nsamples to %d\n",                    nsamples    ); 
-    printf("\tSetting sampleEvery to %d (ps)\n",            sampleEvery );
-    printf("\tSetting natom_mol to %d\n",                   natom_mol   );
-    printf("\tSetting nchrom_mol to %d\n",                  nchrom_mol  );
-    printf("\tSetting nzeros to %d\n",                      nzeros      );
-    printf("\tSetting maxCouple to %d\n",                   maxCouple   );
+    mpiprintf("\tSetting xtc file %s\n",                       gmxf        );
+    mpiprintf("\tSetting output file name to %s\n",            outf        );
+    mpiprintf("\tSetting cpt file %s\n",                       cptf        );
+    mpiprintf("\tSetting model to %s\n",                       model       );
+    mpiprintf("\tSetting the number of tcf points to %d\n",    ntcfpoints  );
+    mpiprintf("\tSetting nsamples to %d\n",                    nsamples    ); 
+    mpiprintf("\tSetting sampleEvery to %d (ps)\n",            sampleEvery );
+    mpiprintf("\tSetting natom_mol to %d\n",                   natom_mol   );
+    mpiprintf("\tSetting nchrom_mol to %d\n",                  nchrom_mol  );
+    mpiprintf("\tSetting nzeros to %d\n",                      nzeros      );
+    mpiprintf("\tSetting maxCouple to %d\n",                   maxCouple   );
 #ifdef USE_DOUBLES
-    printf("\tSetting dt to %lf\n",                         dt          );
-    printf("\tSetting t1 to %lf (ps)\n",                    t1          );
-    printf("\tSetting avef to %lf\n",                       avef        );
-    printf("\tSetting equilibration time to %lf (ps)\n",    beginTime   );
-    printf("\tSetting cplCut to %lf\n",                     cplCut      );
+    mpiprintf("\tSetting dt to %lf\n",                         dt          );
+    mpiprintf("\tSetting t1 to %lf (ps)\n",                    t1          );
+    mpiprintf("\tSetting avef to %lf\n",                       avef        );
+    mpiprintf("\tSetting equilibration time to %lf (ps)\n",    beginTime   );
+    mpiprintf("\tSetting cplCut to %lf\n",                     cplCut      );
 #else
-    printf("\tSetting dt to %f\n",                          dt          );
-    printf("\tSetting t1 to %f (ps)\n",                     t1          );
-    printf("\tSetting avef to %f\n",                        avef        );
-    printf("\tSetting equilibration time to %f (ps)\n",     beginTime   );
-    printf("\tSetting cplCut to %f\n",                      cplCut      );
+    mpiprintf("\tSetting dt to %f\n",                          dt          );
+    mpiprintf("\tSetting t1 to %f (ps)\n",                     t1          );
+    mpiprintf("\tSetting avef to %f\n",                        avef        );
+    mpiprintf("\tSetting equilibration time to %f (ps)\n",     beginTime   );
+    mpiprintf("\tSetting cplCut to %f\n",                      cplCut      );
 #endif
 
     // set imodel based on model passed...if 1, reset OM lengths to tip4p lengths
     if ( strcmp( model, "tip4p2005" ) == 0 || strcmp( model, "e3b3" ) == 0 ) imodel = 1;
     else imodel = 0;
  
-
+    // divide up samples for different mpi processes
+    istart = rank*nsamples/nproc; iend = (rank+1)*nsamples/nproc,nsamples;
 
     // Useful variables and condstants
     int                 natoms, nmol, nchrom;                                           // number of atoms, molecules, chromophores
@@ -193,7 +209,7 @@ int main(int argc, char *argv[])
     XDRFILE *trj = xdrfile_open( gmxf, "r" ); 
     if ( trj == NULL )
     {
-        printf("WARNING: The file %s could not be opened. Is the name correct?\n", gmxf);
+        mpiprintf("WARNING: The file %s could not be opened. Is the name correct?\n", gmxf);
         exit(EXIT_FAILURE);
     }
 
@@ -204,9 +220,9 @@ int main(int argc, char *argv[])
     kappaFillMax = (long long int) nchrom*maxCouple*2 + nchrom;
     nlistFillMax = (long long int) nchrom*maxCouple   + nchrom;
 
-    printf(">>> Will read the trajectory from: %s.\n",gmxf);
-    printf(">>> Found %d atoms and %d molecules.\n",natoms, nmol);
-    printf(">>> Found %d chromophores.\n",nchrom);
+    mpiprintf(">>> Will read the trajectory from: %s.\n",gmxf);
+    mpiprintf(">>> Found %d atoms and %d molecules.\n",natoms, nmol);
+    mpiprintf(">>> Found %d chromophores.\n",nchrom);
 
 
     // ***              MEMORY ALLOCATION               *** //
@@ -242,37 +258,41 @@ int main(int argc, char *argv[])
     if ( strstr(argv[1], ".cpt") != NULL )
     {
         // read in checkpoint file
+        /*
         checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
                     &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
                     &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_READ );
+                    */
     }
     // **************************************************** //
 
 
     
-    printf("\n>>> Now calculating the absorption spectrum\n");
-    printf("----------------------------------------------------------\n");
+    mpiprintf("\n>>> Now calculating the absorption spectrum\n");
+    mpiprintf("----------------------------------------------------------\n");
 
 
 
     // **************************************************** //
     // ***          OUTER LOOP OVER SAMPLES             *** //
 
-    while( currentSample < nsamples )
+    currentSample = istart;
+
+    while( currentSample < iend )
     {
 
         // search trajectory for current sample starting point
         xdrinfo = read_xtc( trj, natoms, &step, &gmxtime, box, x, &prec );
         if ( xdrinfo != 0 )
         {
-            printf("WARNING:: read_xtc returned error %d.\n"
+            mpiprintf("WARNING:: read_xtc returned error %d.\n"
                    "Is the trajectory long enough?\n", xdrinfo);
             exit(EXIT_FAILURE);
         }
 
         if ( currentSample * sampleEvery + (int) beginTime == (int) gmxtime )
         {
-            printf("\n    Now processing sample %d/%d starting at %.2f ps\n", currentSample + 1, nsamples, gmxtime );
+            mpiprintf("\n    Now processing sample %d/%d starting at %.2f ps\n", currentSample + 1, iend, gmxtime );
             fflush(stdout);
 
             // If starting from checkpoint, fast forward the trajectory until you are at the correct frame 
@@ -287,9 +307,11 @@ int main(int argc, char *argv[])
                 // If the program has recieved an interrupt or termination signal, write the current state and exit
                 if ( interrupted )
                 {
+                    /*
                     checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
                                 &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
                                 &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
+                                */
                     exit(EXIT_SUCCESS);
                 }
 
@@ -412,7 +434,7 @@ int main(int argc, char *argv[])
 
 
                 // update progress bar if simulation is big enough, otherwise it really isn't necessary
-                if ( nchrom > 400 && !interrupted ) printProgress( currentFrame, ntcfpoints-1 );
+                if ( nchrom > 400 && !interrupted && rank == 0) printProgress( currentFrame, ntcfpoints-1 );
             
                 // done with current frame, move to next
                 currentFrame += 1;
@@ -423,61 +445,92 @@ int main(int argc, char *argv[])
             currentFrame  = 0;
 
             // checkpoint after every sample
-            checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
+            /*checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
                         &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, &currentSample, 
                         &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
+                        */
         }
     } // end outer loop
 
 
-    printf("\n\n----------------------------------------------------------\n");
-    printf("Finishing up...\n");
+    mpiprintf("\n\n----------------------------------------------------------\n");
+    mpiprintf("Finishing up...\n");
 
     // close xdr file
     xdrfile_close(trj);
 
 
-    // pad the time correlation function with zeros, and fourier transform the time correlation function using fftw library
-    pdtcf = (user_complex_t *) calloc( ntcfpoints+nzeros, sizeof(user_complex_t));
+    // reduce tcf to root
+    user_real_t *rtcfa, *itcfa, *rtcfsum, *itcfsum;
+    rtcfa   = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( rtcf    == NULL )    MALLOC_ERR;
+    itcfa   = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( itcf    == NULL )    MALLOC_ERR;
+    rtcfsum = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( rtcfsum == NULL )    MALLOC_ERR;
+    itcfsum = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( itcfsum == NULL )    MALLOC_ERR;
+ 
     for ( int i = 0; i < ntcfpoints; i++ )
     {
-        // multiply the tcf by the relaxation term
-        dcy      = exp( -1.0 * i * dt / ( 2.0 * t1 ));
-        tcf[i]   = tcf[i]*dcy;
-        pdtcf[i] = tcf[i] / nsamples;
+        rtcfa[i] = creal(tcf[i]);
+        itcfa[i] = cimag(tcf[i]);
     }
-    for ( int i = 0; i < nzeros; i++ ) pdtcf[i+ntcfpoints] = 0. + 0.*I;
 
-    plan = fftw_plan_dft_c2r_1d( ntcfpoints + nzeros, pdtcf, Ftcf, FFTW_ESTIMATE );
-    fftw_execute(plan);
+#ifdef USE_DOUBLES
+    ierr = MPI_Reduce( rtcfa, rtcfsum, ntcfpoints, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD );
+    ierr = MPI_Reduce( itcfa, itcfsum, ntcfpoints, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD );
+#else
+    ierr = MPI_Reduce( rtcfa, rtcfsum, ntcfpoints, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD );
+    ierr = MPI_Reduce( itcfa, itcfsum, ntcfpoints, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD );
+#endif
 
-    // write time correlation function
-    rtcf = fopen(strcat(strcpy(fname,outf),"rtcf.dat"), "w");
-    itcf = fopen(strcat(strcpy(fname,outf),"itcf.dat"), "w");
-    for ( int i = 0; i < ntcfpoints; i++ )
+    if ( rank == 0 )
     {
-        fprintf( rtcf, "%g %g \n", i*dt, ( creal(tcf[i])) );
-        fprintf( itcf, "%g %g \n", i*dt, ( cimag(tcf[i])) );
-    }
-    fclose( rtcf );
-    fclose( itcf );
+ 
+        for ( int i = 0; i < ntcfpoints; i++ )
+        {
+            tcf[i] = rtcfsum[i] + I*itcfsum[i];
+        }
 
-    // Write the absorption lineshape
-    // Since the C2R transform is inverse by default, the frequencies have to be negated
-    // NOTE: to compare with YICUN's code, divide Ftcf by 2
-    spec_lineshape = fopen(strcat(strcpy(fname,outf),"spec.dat"),"w");
-    factor         = 2*PI*HBAR/(dt*(ntcfpoints+nzeros));                // conversion factor to give energy and correct intensity from FFT
-    for ( int i = (ntcfpoints+nzeros)/2; i < ntcfpoints+nzeros; i++ )   // "negative" FFT frequencies
-    {
-        freq = (i-ntcfpoints-nzeros)*factor + avef;
-        fprintf(spec_lineshape, "%g %g\n", freq, Ftcf[i]/(factor*(ntcfpoints+nzeros)));
+        pdtcf = (user_complex_t *) calloc( ntcfpoints+nzeros, sizeof(user_complex_t));
+        // let root take the fft and write output files
+        for ( int i = 0; i < ntcfpoints; i++ )
+        {
+            // multiply the tcf by the relaxation term
+            dcy      = exp( -1.0 * i * dt / ( 2.0 * t1 ));
+            tcf[i]   = tcf[i]*dcy;
+            pdtcf[i] = tcf[i] / nsamples;
+        }
+        for ( int i = 0; i < nzeros; i++ ) pdtcf[i+ntcfpoints] = 0. + 0.*I;
+
+        plan = fftw_plan_dft_c2r_1d( ntcfpoints + nzeros, pdtcf, Ftcf, FFTW_ESTIMATE );
+        fftw_execute(plan);
+
+        // write time correlation function
+        rtcf = fopen(strcat(strcpy(fname,outf),"rtcf.dat"), "w");
+        itcf = fopen(strcat(strcpy(fname,outf),"itcf.dat"), "w");
+        for ( int i = 0; i < ntcfpoints; i++ )
+        {
+            fprintf( rtcf, "%g %g \n", i*dt, ( creal(tcf[i])) );
+            fprintf( itcf, "%g %g \n", i*dt, ( cimag(tcf[i])) );
+        }
+        fclose( rtcf );
+        fclose( itcf );
+
+        // Write the absorption lineshape
+        // Since the C2R transform is inverse by default, the frequencies have to be negated
+        // NOTE: to compare with YICUN's code, divide Ftcf by 2
+        spec_lineshape = fopen(strcat(strcpy(fname,outf),"spec.dat"),"w");
+        factor         = 2*PI*HBAR/(dt*(ntcfpoints+nzeros));                // conversion factor to give energy and correct intensity from FFT
+        for ( int i = (ntcfpoints+nzeros)/2; i < ntcfpoints+nzeros; i++ )   // "negative" FFT frequencies
+        {
+            freq = (i-ntcfpoints-nzeros)*factor + avef;
+            fprintf(spec_lineshape, "%g %g\n", freq, Ftcf[i]/(factor*(ntcfpoints+nzeros)));
+        }
+        for ( int i = 0; i < ntcfpoints+nzeros / 2 ; i++)                   // "positive" FFT frequencies
+        {
+            freq = i*factor + avef;
+            fprintf(spec_lineshape, "%g %g\n", freq, Ftcf[i]/(factor*(ntcfpoints+nzeros)));
+        }
+        fclose(spec_lineshape);
     }
-    for ( int i = 0; i < ntcfpoints+nzeros / 2 ; i++)                   // "positive" FFT frequencies
-    {
-        freq = i*factor + avef;
-        fprintf(spec_lineshape, "%g %g\n", freq, Ftcf[i]/(factor*(ntcfpoints+nzeros)));
-    }
-    fclose(spec_lineshape);
 
     // free the variables
     free(x);
@@ -501,7 +554,9 @@ int main(int argc, char *argv[])
 
 
     end = time(NULL);
-    printf("\n>>> Done with the calculation in %f seconds.\n", difftime(end,start));
+    mpiprintf("\n>>> Done with the calculation in %f seconds.\n", difftime(end,start));
+
+    MPI_Finalize();
 
     return 0;
 }
@@ -941,7 +996,7 @@ user_real_t dot3( user_real_t x[3], user_real_t y[3] )
 // parse input file to setup calculation
 void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[], user_real_t *dt, int *ntcfpoints, 
               int *nsamples, int *sampleEvery, user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
-              int *nzeros, user_real_t *beginTime, user_real_t *cplCut, int *maxCouple )
+              int *nzeros, user_real_t *beginTime, user_real_t *cplCut, int *maxCouple, int rank )
 {
     char                para[MAX_STR_LEN];
     char                value[MAX_STR_LEN];
@@ -952,7 +1007,7 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
         printf("ERROR: Could not open %s. The first argument should contain  a  vaild\nfile name that points to a file containing the simulation parameters\n or a checkpoint file ending in '.cpt' to restart the simulation.", argv[1]);
         exit(EXIT_FAILURE);
     }
-    else printf(">>> Reading parameters from input file %s\n", argv[1]);
+    else mpiprintf(">>> Reading parameters from input file %s\n", argv[1]);
 
     // Parse input file
     while (fscanf( inpf, "%s%s%*[^\n]", para, value ) != EOF)
@@ -1046,12 +1101,12 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
 #endif
         else
         {
-            printf("WARNING: Parameter %s in input file %s not recognized, ignoring.\n", para, argv[1]);
+            mpiprintf("WARNING: Parameter %s in input file %s not recognized, ignoring.\n", para, argv[1]);
         }
     }
 
     fclose(inpf);
-    printf(">>> Done reading input file and setting parameters\n");
+    mpiprintf(">>> Done reading input file and setting parameters\n");
 
 }
 

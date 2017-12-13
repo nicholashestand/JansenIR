@@ -17,6 +17,7 @@
 #include <xdrfile/xdrfile.h>
 #include <xdrfile/xdrfile_xtc.h>
 #include <fftw3.h>
+#include <mpi.h>
 
 
 #ifdef USE_DOUBLES
@@ -42,6 +43,7 @@ typedef float complex user_complex_t;
 #define CP_READ     1
 #define CP_INIT     3
 #define MALLOC_ERR  { printf(">>> ERROR on CPU: out of memory.\n"); exit(EXIT_FAILURE);}
+#define mpiprintf   if ( rank == 0 ) printf
 
 
 // FUNCTIONS
@@ -69,7 +71,7 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
               user_real_t *dt, int *ntcfpoints,  int *nsamples, 
               int *sampleEvery, user_real_t *t1, user_real_t *avef,
               int *natom_mol, int *nchrom_mol, int *nzeros, user_real_t *beginTime,
-              user_real_t *cplCut, int *maxCouple );
+              user_real_t *cplCut, int *maxCouple, int rank );
 
 void printProgress( int currentStep, int totalSteps );
 
