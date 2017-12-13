@@ -11,11 +11,6 @@
 #include "calcIR.h" 
 
 
-// Global variable to catch interrupt and terminate signals
-volatile sig_atomic_t interrupted=false;
-
-// TODO: Use neighbor list
-// TODO: ALLOW SOME PARAMETERS TO CHANGE WHEN STARTING FROM CPT, if desired
 // TODO: Get rid of xyz and just make mu a scalar
 
 
@@ -37,17 +32,11 @@ int main(int argc, char *argv[])
     // Some help for starting the program. User must supply a single argument
     if ( argc != 2 ){
         mpiprintf("Usage:\n"
-                  "\tInclude as the first argument either the name of an input file,  or a checkpoint\n"
-                  "\tfile with extension '.cpt' if restarting the calculation. No other arguments are\n"
+                  "\tInclude as the first argument the name of an input file. No other artuments are \n"
                   "\tallowed.\n");
         MPI_Finalize();
         exit(EXIT_SUCCESS);
     }
-
-
-    // register signal handler to take care of interruption and termination signals
-    signal( SIGINT,  signal_handler );
-    signal( SIGTERM, signal_handler );
 
     
 
@@ -80,21 +69,9 @@ int main(int argc, char *argv[])
 
 
     // read in model parameters
-    if ( strstr(argv[1], ".cpt") == NULL )
-    {
-        // START FROM INPUT FILE
-        ir_init( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, &cplCut, &maxCouple, rank );
-    }
-    else
-    {
-        // START FROM CHECKPOINT FILE
-        /*
-        checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                    &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, 0, NULL, NULL, NULL, NULL, 
-                    NULL, NULL, &cplCut, &maxCouple, CP_INIT );
-                    */
-    }
+    // START FROM INPUT FILE
+    ir_init( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
+            &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, &cplCut, &maxCouple, rank );
 
 
     // Print the parameters to stdout
@@ -252,22 +229,6 @@ int main(int argc, char *argv[])
     // **************************************************** //
     
 
-
-    // ***       Read State Info From Checkpoint        *** //
-    // **************************************************** //
-    if ( strstr(argv[1], ".cpt") != NULL )
-    {
-        // read in checkpoint file
-        /*
-        checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
-                    &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
-                    &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_READ );
-                    */
-    }
-    // **************************************************** //
-
-
-    
     mpiprintf("\n>>> Now calculating the absorption spectrum\n");
     mpiprintf("----------------------------------------------------------\n");
 
@@ -295,26 +256,11 @@ int main(int argc, char *argv[])
             mpiprintf("\n    Now processing sample %d/%d starting at %.2f ps\n", currentSample + 1, iend, gmxtime );
             fflush(stdout);
 
-            // If starting from checkpoint, fast forward the trajectory until you are at the correct frame 
-            if ( currentFrame != 0 ) for ( int i = 0; i < currentFrame - 1 ; i++ ) read_xtc( trj, natoms, &step, &gmxtime, box, x, &prec );
-
 
             // **************************************************** //
             // ***         MAIN LOOP OVER TRAJECTORY            *** //
             while( currentFrame < ntcfpoints )
             {
- 
-                // If the program has recieved an interrupt or termination signal, write the current state and exit
-                if ( interrupted )
-                {
-                    /*
-                    checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
-                                &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
-                                &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
-                                */
-                    exit(EXIT_SUCCESS);
-                }
-
 
 
                 // ---------------------------------------------------- //
@@ -434,7 +380,7 @@ int main(int argc, char *argv[])
 
 
                 // update progress bar if simulation is big enough, otherwise it really isn't necessary
-                if ( nchrom > 400 && !interrupted && rank == 0) printProgress( currentFrame, ntcfpoints-1 );
+                if ( nchrom > 400 && rank == 0) printProgress( currentFrame, ntcfpoints-1 );
             
                 // done with current frame, move to next
                 currentFrame += 1;
@@ -444,17 +390,8 @@ int main(int argc, char *argv[])
             currentSample +=1;
             currentFrame  = 0;
 
-            // checkpoint after every sample
-            /*checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                        &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, &currentSample, 
-                        &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
-                        */
         }
     } // end outer loop
-
-
-    mpiprintf("\n\n----------------------------------------------------------\n");
-    mpiprintf("Finishing up...\n");
 
     // close xdr file
     xdrfile_close(trj);
@@ -480,6 +417,8 @@ int main(int argc, char *argv[])
     ierr = MPI_Reduce( rtcfa, rtcfsum, ntcfpoints, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD );
     ierr = MPI_Reduce( itcfa, itcfsum, ntcfpoints, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD );
 #endif
+    mpiprintf("\n\n----------------------------------------------------------\n");
+    mpiprintf("All samples now reduced to rank 0.\n Finishing up.");
 
     if ( rank == 0 )
     {
@@ -550,6 +489,10 @@ int main(int argc, char *argv[])
     free(nlisti);
     free(nlistj);
     free(A0_2);
+    free(rtcfa);
+    free(itcfa);
+    free(rtcfsum);
+    free(itcfsum);
 
 
 
@@ -1004,8 +947,9 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
     FILE *inpf = fopen(argv[1],"r");
     if ( inpf == NULL )
     {
-        printf("ERROR: Could not open %s. The first argument should contain  a  vaild\nfile name that points to a file containing the simulation parameters\n or a checkpoint file ending in '.cpt' to restart the simulation.", argv[1]);
-        exit(EXIT_FAILURE);
+        printf("ERROR: Could not open %s. The first argument should contain  a  vaild\nfile name that points to a file containing the simulation parameters.\n", argv[1]);
+        MPI_Finalize();
+        exit(0);
     }
     else mpiprintf(">>> Reading parameters from input file %s\n", argv[1]);
 
@@ -1119,140 +1063,4 @@ void printProgress( int currentStep, int totalSteps )
     int lpad = (int) (percentage*PWID);
     int rpad = PWID - lpad;
     fprintf(stderr, "\r [%.*s%*s]%3d%%", lpad, PSTR, rpad, "",(int) (percentage*100));
-}
-
-
-// Checkpoint the simulation
-void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model[], user_real_t *dt, int *ntcfpoints, 
-                 int *nsamples, int *sampleEvery, user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
-                 int *nzeros, user_real_t *beginTime, int nchrom, int *currentSample, int *currentFrame, user_complex_t *tcf, 
-                 user_complex_t *cmux0, user_complex_t *cmuy0, user_complex_t *cmuz0, user_real_t *cplCut, int *maxCouple, 
-                 int RWI_FLAG )
-{
-
-    FILE *cptfp;                // checkpoint file pointer
-    char bakf[MAX_STR_LEN];     // backup file name
- 
-
-    // Writing the checkpoint file
-    if ( RWI_FLAG == CP_WRITE )
-    {
-        // if cpt file exists, back it up before proceeding
-        sprintf(bakf,"%s.bak",cptf);
-        if( access( cptf, F_OK ) != -1 ) rename( cptf, bakf );
-
-        // back up calculation
-        cptfp = fopen(cptf, "wb");
-
-        // Write the simulation parameters      
-        fwrite( gmxf        , MAX_STR_LEN           , 1, cptfp );         // trajectory file
-        fwrite( cptf        , MAX_STR_LEN           , 1, cptfp );         // checkpoint file
-        fwrite( outf        , MAX_STR_LEN           , 1, cptfp );         // output file names
-        fwrite( model       , MAX_STR_LEN           , 1, cptfp );         // model
-        fwrite( ntcfpoints  , sizeof(int)           , 1, cptfp );         // number of tcf points
-        fwrite( nsamples    , sizeof(int)           , 1, cptfp );         // number of samples
-        fwrite( sampleEvery , sizeof(int)           , 1, cptfp );         // time between samples
-        fwrite( natom_mol   , sizeof(int)           , 1, cptfp );         // atoms per molecule
-        fwrite( nchrom_mol  , sizeof(int)           , 1, cptfp );         // chromophores per molecule
-        fwrite( nzeros      , sizeof(int)           , 1, cptfp );         // number of zeros to pad the tcf before FT
-        fwrite( maxCouple   , sizeof(int)           , 1, cptfp );         // maximum number of coupled molecules
-
-        fwrite( t1          , sizeof(user_real_t)   , 1, cptfp );         // relaxation time
-        fwrite( dt          , sizeof(user_real_t)   , 1, cptfp );         // timestep
-        fwrite( avef        , sizeof(user_real_t)   , 1, cptfp );         // average frequency
-        fwrite( beginTime   , sizeof(user_real_t)   , 1, cptfp );         // time to start taking samples
-        fwrite( cplCut      , sizeof(user_real_t)   , 1, cptfp );         // cutoff for coupling calc in nm
-
-
-        // Write the current configuration
-        fwrite( currentSample,  sizeof(int)         , 1, cptfp );         // current sample number
-        fwrite( currentFrame ,  sizeof(int)         , 1, cptfp );         // current frame  number
-        fwrite( tcf, sizeof(user_complex_t), *ntcfpoints, cptfp );         // current time correlation function
-
-        if (*currentFrame !=0){// if at frame 0, this will all be generated on restart and doesn't need to be recorded
-            // copy memory from gpu to cpu and write
-            fwrite( cmux0  , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-            fwrite( cmuy0  , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-            fwrite( cmuz0  , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-        }
-
-        // close the file
-        fclose(cptfp);
-    }
-    // Read the configuration from the checkpoint file
-    else
-    {
-        // if cpt file exists, read it and restart calculation, else abort
-        if( access( argv[1], F_OK ) != -1 ) 
-        {
-            // Initialize the simulation by reading parameters
-            if ( RWI_FLAG == CP_INIT )
-            {
-                // open the file
-                cptfp = fopen(argv[1],"rb");
-
-                // Read the simulation parameters      
-                fread( gmxf        , MAX_STR_LEN           , 1, cptfp );         // trajectory file
-                fread( cptf        , MAX_STR_LEN           , 1, cptfp );         // checkpoint file
-                fread( outf        , MAX_STR_LEN           , 1, cptfp );         // output file names
-                fread( model       , MAX_STR_LEN           , 1, cptfp );         // model
-                fread( ntcfpoints  , sizeof(int)           , 1, cptfp );         // number of tcf points
-                fread( nsamples    , sizeof(int)           , 1, cptfp );         // number of samples -- TODO: Doesn't need to be the same
-                fread( sampleEvery , sizeof(int)           , 1, cptfp );         // time between samples
-                fread( natom_mol   , sizeof(int)           , 1, cptfp );         // atoms per molecule
-                fread( nchrom_mol  , sizeof(int)           , 1, cptfp );         // chromophores per molecule
-                fread( nzeros      , sizeof(int)           , 1, cptfp );         // number of zeros to pad the tcf before FT -- TODO: Doesn't need to be the same
-                fread( maxCouple   , sizeof(int)           , 1, cptfp );         // maximum number of coupled molecules
-
-                fread( t1          , sizeof(user_real_t)   , 1, cptfp );         // relaxation time -- TODO: Doesn't need to be the same
-                fread( dt          , sizeof(user_real_t)   , 1, cptfp );         // timestep
-                fread( avef        , sizeof(user_real_t)   , 1, cptfp );         // average frequency
-                fread( beginTime   , sizeof(user_real_t)   , 1, cptfp );         // time to start taking samples
-                fread( cplCut      , sizeof(user_real_t)   , 1, cptfp );         // cutoff for coupling calc in nm
-
-                // close the file 
-                fclose(cptfp);
-
-            }
-            // Read the current state
-            else if ( RWI_FLAG == CP_READ )
-            {
-                // open the file
-                cptfp = fopen(argv[1],"rb");
-    
-                // skip bytes containing simulation parameters
-                fseek( cptfp, 4*MAX_STR_LEN + 7 * sizeof(int) + 5 * sizeof(user_real_t), SEEK_SET );
-
-                // Write the current configuration
-                fread( currentSample,  sizeof(int)         , 1, cptfp );         // current sample number
-                fread( currentFrame ,  sizeof(int)         , 1, cptfp );         // current frame  number
-                fread( tcf, sizeof(user_complex_t), *ntcfpoints, cptfp );         // current time correlation function
-                if (*currentFrame !=0){
-                    // read and copy memory from cpu to gpu
-                    fread( cmux0   , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-                    fread( cmuy0   , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-                    fread( cmuz0   , sizeof(user_complex_t), nchrom        , cptfp ); // mu0 -- not needed at frame 0
-                }
-
-                // close the file
-                fclose(cptfp);
-
-                // print message to user about the restart
-                printf(">>> Found checkpoint file %s.\n>>> Will restart the calculation from sample %d and frame %d.",cptf, *currentSample+1, *currentFrame);
- 
-            }
-        }
-        else
-        {
-            printf(">>> No cpt file found (looking for %s). Aborting \n", argv[1]);
-            exit(EXIT_FAILURE);
-        }
-    }
-}
-
-void signal_handler( int sig )
-{
-    //... program has recieved some signal
-    interrupted=true;
-    fprintf(stderr, "\nRecieved signal. Will write checkpoint file and exit.\n");
 }

@@ -75,13 +75,4 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
 
 void printProgress( int currentStep, int totalSteps );
 
-void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model[], 
-                 user_real_t *dt, int *ntcfpoints, int *nsamples, int *sampleEvery, 
-                 user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
-                 int *nzeros, user_real_t *beginTime, int nchrom, int *currentSample, 
-                 int *currentFrame, user_complex_t *tcf, user_complex_t *cmux0, 
-                 user_complex_t *cmuy0, user_complex_t *cmuz0, user_real_t *cplCut,
-                 int *maxCouple, int RWI_FLAG );
-
-void signal_handler( int sig );
 #endif
