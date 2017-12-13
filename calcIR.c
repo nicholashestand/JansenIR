@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
     // Some help for starting the program. User must supply a single argument
     if ( argc != 2 ){
         mpiprintf("Usage:\n"
-                  "\tInclude as the first argument the name of an input file. No other artuments are \n"
+                  "\tInclude as the first argument the name of an input file. No other arguments are \n"
                   "\tallowed.\n");
         MPI_Finalize();
         exit(EXIT_SUCCESS);
