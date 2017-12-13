@@ -62,19 +62,23 @@ int main(int argc, char *argv[])
     user_real_t   t1            = 0.260;                                  // relaxation time ( in ps )
     user_real_t   avef          = 3415.2;                                 // the approximate average stretch frequency to get rid of high
                                                                           // frequency oscillations in the time correlation function
+    user_real_t   cplCut        = 1.0;                                    // O-O cutoff for coupling calculations in nm
+    int           maxCouple     = 100;                                    // maximum number of coupled molecules
+
 
     // read in model parameters
     if ( strstr(argv[1], ".cpt") == NULL )
     {
         // START FROM INPUT FILE
         ir_init( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime );
+                &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, &cplCut, &maxCouple );
     }
     else
     {
         // START FROM CHECKPOINT FILE
         checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
-                    &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, 0, NULL, NULL, NULL, NULL, NULL, NULL, CP_INIT );
+                    &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, 0, NULL, NULL, NULL, NULL, 
+                    NULL, NULL, &cplCut, &maxCouple, CP_INIT );
     }
 
 
@@ -89,16 +93,19 @@ int main(int argc, char *argv[])
     printf("\tSetting natom_mol to %d\n",                   natom_mol   );
     printf("\tSetting nchrom_mol to %d\n",                  nchrom_mol  );
     printf("\tSetting nzeros to %d\n",                      nzeros      );
+    printf("\tSetting maxCouple to %d\n",                   maxCouple   );
 #ifdef USE_DOUBLES
     printf("\tSetting dt to %lf\n",                         dt          );
     printf("\tSetting t1 to %lf (ps)\n",                    t1          );
     printf("\tSetting avef to %lf\n",                       avef        );
     printf("\tSetting equilibration time to %lf (ps)\n",    beginTime   );
+    printf("\tSetting cplCut to %lf\n",                     cplCut      );
 #else
     printf("\tSetting dt to %f\n",                          dt          );
     printf("\tSetting t1 to %f (ps)\n",                     t1          );
     printf("\tSetting avef to %f\n",                        avef        );
     printf("\tSetting equilibration time to %f (ps)\n",     beginTime   );
+    printf("\tSetting cplCut to %f\n",                      cplCut      );
 #endif
 
     // set imodel based on model passed...if 1, reset OM lengths to tip4p lengths
@@ -114,7 +121,7 @@ int main(int argc, char *argv[])
     const int           ntcfpointsR     = ( nzeros + ntcfpoints - 1 ) * 2;              // number of points for the real fourier transform
     long long int       nchrom2;                                                        // nchrom squared
     long long int       kappaFill, kappaFillMax;                                        // number of nonzero hamiltonian elements
-    int                 maxCouple       = 100;                                          // maximum number of coupled chromophores...may need to adjust this
+    long long int       nlistFill, nlistFillMax;                                        // number of neighbors in neighborlist
     int                 ii, jj;                                                         // indices for sparse matrix
 
 
@@ -127,12 +134,12 @@ int main(int argc, char *argv[])
 
     // Spectroscopy Variables
     user_complex_t      *cmux0, *cmuy0, *cmuz0;                                         // complex version of the transition dipole moment at t=0 
-    user_complex_t      *cmux0half, *cmuy0half, *cmuz0half;
     user_complex_t      *cmux,  *cmuy,  *cmuz;                                          // complex versions of the transition dipole moment
     user_complex_t      *tmpmu;                                                         // to sum all polarizations
     user_real_t         *eproj;                                                         // the electric field projected along the oh bonds
     user_real_t         *kappa;                                                         // the hamiltonian
     int                 *kappai, *kappaj;                                               // to keep the hamiltonian sparse
+    int                 *nlisti, *nlistj;                                               // to keep neighborlist indices
 
     // For Jansen propigation
     user_complex_t      *A0_2;                                                          // to propigate mu0
@@ -194,7 +201,8 @@ int main(int argc, char *argv[])
     nmol         = natoms / natom_mol;
     nchrom       = nmol * nchrom_mol;
     nchrom2      = (long long int) nchrom*nchrom;
-    kappaFillMax = (long long int) nchrom*maxCouple + nchrom;
+    kappaFillMax = (long long int) nchrom*maxCouple*2 + nchrom;
+    nlistFillMax = (long long int) nchrom*maxCouple   + nchrom;
 
     printf(">>> Will read the trajectory from: %s.\n",gmxf);
     printf(">>> Found %d atoms and %d molecules.\n",natoms, nmol);
@@ -216,13 +224,12 @@ int main(int argc, char *argv[])
     cmux0   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmux0 == NULL) MALLOC_ERR;
     cmuy0   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmuy0 == NULL) MALLOC_ERR;
     cmuz0   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmuz0 == NULL) MALLOC_ERR;
-    cmux0half   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmux0half == NULL) MALLOC_ERR;
-    cmuy0half   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmuy0half == NULL) MALLOC_ERR;
-    cmuz0half   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( cmuz0half == NULL) MALLOC_ERR;
     tmpmu   = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( tmpmu == NULL) MALLOC_ERR;
     kappa   = (user_real_t *)    calloc( kappaFillMax , sizeof(user_real_t));       if ( kappa == NULL) MALLOC_ERR;
-    kappai  = (int *)            calloc( kappaFillMax , sizeof(long long int));     if ( kappai== NULL) MALLOC_ERR;
-    kappaj  = (int *)            calloc( kappaFillMax , sizeof(long long int));     if ( kappaj== NULL) MALLOC_ERR;
+    kappai  = (int *)            calloc( kappaFillMax , sizeof(int));               if ( kappai== NULL) MALLOC_ERR;
+    kappaj  = (int *)            calloc( kappaFillMax , sizeof(int));               if ( kappaj== NULL) MALLOC_ERR;
+    nlisti  = (int *)            calloc( nlistFillMax , sizeof(int));               if ( nlisti== NULL) MALLOC_ERR;
+    nlistj  = (int *)            calloc( nlistFillMax , sizeof(int));               if ( nlistj== NULL) MALLOC_ERR;
     A0_2    = (user_complex_t *) calloc( nchrom       , sizeof(user_complex_t));    if ( A0_2  == NULL) MALLOC_ERR;
 
     // ***            END MEMORY ALLOCATION             *** //
@@ -237,7 +244,7 @@ int main(int argc, char *argv[])
         // read in checkpoint file
         checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
                     &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
-                    &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, CP_READ );
+                    &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_READ );
     }
     // **************************************************** //
 
@@ -282,7 +289,7 @@ int main(int argc, char *argv[])
                 {
                     checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, 
                                 &t1, &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, 
-                                &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, CP_WRITE );
+                                &currentSample, &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
                     exit(EXIT_SUCCESS);
                 }
 
@@ -297,9 +304,11 @@ int main(int argc, char *argv[])
                 if ( currentFrame != 0 ) read_xtc( trj, natoms, &step, &gmxtime, box, x, &prec );
 
                 // calculate the electric field projection along OH bonds and build the exciton hamiltonian
-                get_eproj        ( x, box[0][0], box[1][1], box[2][2], natoms, natom_mol, nchrom, nchrom_mol, nmol, imodel, eproj );
-                get_kappa_sparse ( x, box[0][0], box[1][1], box[2][2], natoms, natom_mol, nchrom, nchrom_mol, nmol, eproj, kappa, 
-                                   cmux, cmuy, cmuz, avef, &kappaFill, kappaFillMax, kappai, kappaj );
+                get_eproj        ( x, box[0][0], box[1][1], box[2][2], natoms, natom_mol, nchrom, nchrom_mol, nmol, 
+                                   imodel, eproj, nlisti, nlistj, &nlistFill, nlistFillMax, cplCut );
+                get_kappa_sparse ( x, box[0][0], box[1][1], box[2][2], natoms, natom_mol, nchrom, nchrom_mol, nmol, 
+                                   eproj, kappa, cmux, cmuy, cmuz, avef, &kappaFill, kappaFillMax, kappai, kappaj,
+                                   nlisti, nlistj, nlistFill );
 
                 // ***          Done getting System Info            *** //
                 // ---------------------------------------------------- //
@@ -416,7 +425,7 @@ int main(int argc, char *argv[])
             // checkpoint after every sample
             checkpoint( argv, gmxf, cptf, outf, model, &dt, &ntcfpoints, &nsamples, &sampleEvery, &t1, 
                         &avef, &natom_mol, &nchrom_mol, &nzeros, &beginTime, nchrom, &currentSample, 
-                        &currentFrame, tcf, cmux0, cmuy0, cmuz0, CP_WRITE );
+                        &currentFrame, tcf, cmux0, cmuy0, cmuz0, &cplCut, &maxCouple, CP_WRITE );
         }
     } // end outer loop
 
@@ -481,13 +490,12 @@ int main(int argc, char *argv[])
     free(cmux0);
     free(cmuy0);
     free(cmuz0);
-    free(cmux0half);
-    free(cmuy0half);
-    free(cmuz0half);
     free(tmpmu);
     free(kappa);
     free(kappai);
     free(kappaj);
+    free(nlisti);
+    free(nlistj);
     free(A0_2);
 
 
@@ -505,7 +513,9 @@ int main(int argc, char *argv[])
 
  **********************************************************/
 void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int natom_mol, 
-                int nchrom, int nchrom_mol, int nmol, int model, user_real_t  *eproj )
+                int nchrom, int nchrom_mol, int nmol, int model, user_real_t  *eproj,
+                int *nlisti, int *nlistj, long long int *nlistFill, long long int nlistFillMax,
+                user_real_t cplCut)
 {
     
     int n, m, i, j, istart, istride;
@@ -518,9 +528,13 @@ void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int nat
     user_real_t mom[DIM];                     // the OM vector on molecule m
     user_real_t dr[DIM];                      // the min image vector between two atoms
     user_real_t r;                            // the distance between two atoms 
-    const float cutoff = 0.7831;         // the oh cutoff distance
-    const float bohr_nm = 18.8973;       // convert from bohr to nanometer
+    user_real_t dro;                          // distance between two oxygen atoms
+    const float cutoff = 0.7831;              // the oh cutoff distance
+    const float bohr_nm = 18.8973;            // convert from bohr to nanometer
     user_real_t efield[DIM];                  // the electric field vector
+
+    // initialize nlistFill to zero
+    *nlistFill = 0;
 
     // Loop over the chromophores belonging to the current thread
     for ( chrom = 0; chrom < nchrom; chrom ++ )
@@ -566,11 +580,19 @@ void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int nat
         nohx[1] /= r;
         nohx[2] /= r;
 
-        // for testing with YICUN -- can change to ROH later...
-        //nohx[0] /= 0.09572;
-        //nohx[1] /= 0.09572;
-        //nohx[2] /= 0.09572;
- 
+        // add self to neighborlist
+        if ( chrom % 2 == 0 ) // only do once
+        {
+            nlisti[*nlistFill] = n;
+            nlistj[*nlistFill] = n;
+            *nlistFill        += 1;
+            if (*nlistFill >= nlistFillMax )
+            {
+                printf("nlistFill >= nlistFillMax (=%lld). Aborting!\n", nlistFillMax );
+                exit(EXIT_FAILURE);
+            }
+        }
+
         // ***          DONE WITH MOLECULE N                                *** //
 
 
@@ -585,6 +607,28 @@ void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int nat
             mox[0] = x[ m*natom_mol ][0];
             mox[1] = x[ m*natom_mol ][1];
             mox[2] = x[ m*natom_mol ][2];
+
+            // find o-o displacement and add to neighborlist if is short enough
+            // I am doing this on a molecule basis, not a chromophore basis
+            if ( chrom % 2 == 0 ) // only do once
+            {
+                dr[0]  = minImage( mox[0] - nox[0], boxx );
+                dr[1]  = minImage( mox[1] - nox[1], boxy );
+                dr[2]  = minImage( mox[2] - nox[2], boxz );
+                dro    = mag3(dr);
+                if ( dro < cplCut )
+                {
+                    nlisti[*nlistFill] = n;
+                    nlistj[*nlistFill] = m;
+                    *nlistFill        += 1;
+
+                    if (*nlistFill >= nlistFillMax )
+                    {
+                        printf("nlistFill >= nlistFillMax (=%lld). Aborting!\n", nlistFillMax );
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
 
             // find displacement between oxygen on m and hydrogen on n
             dr[0]  = minImage( mox[0] - nhx[0], boxx );
@@ -659,11 +703,13 @@ void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int nat
 void get_kappa_sparse( rvec *x, float boxx, float boxy, float boxz, int natoms, int natom_mol, 
                        int nchrom, int nchrom_mol, int nmol, user_real_t *eproj, user_real_t *kappa, 
                        user_complex_t *mux, user_complex_t *muy, user_complex_t *muz, user_real_t avef, 
-                       long long int *kappaFill, long long int kappaFillMax, int *kappai, int *kappaj )
+                       long long int *kappaFill, long long int kappaFillMax, int *kappai, int *kappaj,
+                       int *nlisti, int *nlistj, long long int nlistFill )
 {
     
-    int n, m, istart, istride;
+    int n, m;
     int chromn, chromm;
+    int nchroms, mchroms;
     user_real_t mox[DIM];                         // oxygen position on molecule m
     user_real_t mhx[DIM];                         // atom position on molecule m
     user_real_t nhx[DIM];                         // hydrogen position on molecule n of the current chromophore
@@ -687,161 +733,174 @@ void get_kappa_sparse( rvec *x, float boxx, float boxy, float boxz, int natoms, 
     // initialize the fill
     *kappaFill = 0;
 
-    // Loop over the chromophores
-    for ( chromn = 0; chromn < nchrom; chromn++ )
+    // Loop over molecules in neighbor list
+    for ( int pair = 0; pair < nlistFill; pair ++ )
     {
-        // calculate the molecule hosting the current chromophore 
-        // and get the corresponding electric field at the relevant hydrogen
-        n   = chromn / nchrom_mol;
-        En  = eproj[chromn];
+        //printf("%d %lld\n", pair, nlistFill);
+        // get molecule numbers for current pair
+        n = nlisti[pair];
+        m = nlistj[pair];
+        // %printf("%d %d\n", n,m);
 
-        // build the map
-        wn  = 3760.2 - 3541.7*En - 152677.0*En*En;
-        xn  = 0.19285 - 1.7261E-5 * wn;
-        pn  = 1.6466  + 5.7692E-4 * wn;
-        nmuprime = 0.1646 + 11.39*En + 63.41*En*En;
-
-        // and calculate the location of the transition dipole moment
-        // See calc_efield for assumptions about ordering of atoms
-        nox[0]  = x[ n*natom_mol ][0];
-        nox[1]  = x[ n*natom_mol ][1];
-        nox[2]  = x[ n*natom_mol ][2];
-        if ( chromn % 2 == 0 )       //HW1
+        // loop over chromophores on molecule n and m
+        for ( nchroms = 0; nchroms<nchrom_mol; nchroms++ )
         {
-            nhx[0]  = x[ n*natom_mol + 1 ][0];
-            nhx[1]  = x[ n*natom_mol + 1 ][1];
-            nhx[2]  = x[ n*natom_mol + 1 ][2];
-        }
-        else if ( chromn % 2 == 1 )  //HW2
-        {
-            nhx[0]  = x[ n*natom_mol + 2 ][0];
-            nhx[1]  = x[ n*natom_mol + 2 ][1];
-            nhx[2]  = x[ n*natom_mol + 2 ][2];
-        }
+            // get chromophore number
+            chromn = n*nchrom_mol + nchroms;
 
-        // The OH unit vector
-        noh[0] = minImage( nhx[0] - nox[0], boxx );
-        noh[1] = minImage( nhx[1] - nox[1], boxy );
-        noh[2] = minImage( nhx[2] - nox[2], boxz );
-        r      = mag3(noh);
-        noh[0] /= r;
-        noh[1] /= r;
-        noh[2] /= r;
+            // get the corresponding electric field at the relevant hydrogen
+            En  = eproj[chromn];
 
-        // The location of the TDM
-        nmu[0] = minImage( nox[0] + 0.067 * noh[0], boxx );
-        nmu[1] = minImage( nox[1] + 0.067 * noh[1], boxy );
-        nmu[2] = minImage( nox[2] + 0.067 * noh[2], boxz );
+            // build the map
+            wn  = 3760.2 - 3541.7*En - 152677.0*En*En;
+            xn  = 0.19285 - 1.7261E-5 * wn;
+            pn  = 1.6466  + 5.7692E-4 * wn;
+            nmuprime = 0.1646 + 11.39*En + 63.41*En*En;
+
+            // and calculate the location of the transition dipole moment
+            // See calc_efield for assumptions about ordering of atoms
+            nox[0]  = x[ n*natom_mol ][0];
+            nox[1]  = x[ n*natom_mol ][1];
+            nox[2]  = x[ n*natom_mol ][2];
+            if ( chromn % 2 == 0 )       //HW1
+            {
+                nhx[0]  = x[ n*natom_mol + 1 ][0];
+                nhx[1]  = x[ n*natom_mol + 1 ][1];
+                nhx[2]  = x[ n*natom_mol + 1 ][2];
+            }
+            else if ( chromn % 2 == 1 )  //HW2
+            {
+                nhx[0]  = x[ n*natom_mol + 2 ][0];
+                nhx[1]  = x[ n*natom_mol + 2 ][1];
+                nhx[2]  = x[ n*natom_mol + 2 ][2];
+            }
+
+            // The OH unit vector
+            noh[0] = minImage( nhx[0] - nox[0], boxx );
+            noh[1] = minImage( nhx[1] - nox[1], boxy );
+            noh[2] = minImage( nhx[2] - nox[2], boxz );
+            r      = mag3(noh);
+            noh[0] /= r;
+            noh[1] /= r;
+            noh[2] /= r;
+
+            // The location of the TDM
+            nmu[0] = minImage( nox[0] + 0.067 * noh[0], boxx );
+            nmu[1] = minImage( nox[1] + 0.067 * noh[1], boxy );
+            nmu[2] = minImage( nox[2] + 0.067 * noh[2], boxz );
         
-        // and the TDM vector to return (make complex)
-        mux[chromn] = (1. + 0*I) * noh[0] * nmuprime * xn;
-        muy[chromn] = (1. + 0*I) * noh[1] * nmuprime * xn;
-        muz[chromn] = (1. + 0*I) * noh[2] * nmuprime * xn;
+            // and the TDM vector to return (make complex)
+            mux[chromn] = (1. + 0*I) * noh[0] * nmuprime * xn;
+            muy[chromn] = (1. + 0*I) * noh[1] * nmuprime * xn;
+            muz[chromn] = (1. + 0*I) * noh[2] * nmuprime * xn;
 
 
 
-        // Loop over all other chromophores chromm >= chromn
-        for ( chromm = chromn; chromm < nchrom; chromm ++ )
-        {
-            // calculate the molecule hosting the current chromophore 
-            // and get the corresponding electric field at the relevant hydrogen
-            m   = chromm / nchrom_mol;
-            Em  = eproj[chromm];
-
-            // also get the relevent x and p from the map
-            wm  = 3760.2 - 3541.7*Em - 152677.0*Em*Em;
-            xm  = 0.19285 - 1.7261E-5 * wm;
-            pm  = 1.6466  + 5.7692E-4 * wm;
-            mmuprime = 0.1646 + 11.39*Em + 63.41*Em*Em;
-
-            // the diagonal energy
-            if ( chromn == chromm )
+            // Loop over chromophores on molecule m
+            for ( mchroms = 0; mchroms<nchrom_mol; mchroms++ )
             {
-                // Note that this is a flattened 2d array -- subtract high frequency energies to get rid of highly oscillatory parts of the F matrix
-                kappai[*kappaFill] = chromn; 
-                kappaj[*kappaFill] = chromm;
-                kappa [*kappaFill] = wm - avef;
-                *kappaFill += 1;
-            }
+                chromm = m*nchrom_mol + mchroms;
+                if (chromm < chromn) continue; // only do upper diagonal
+ 
+                // get the corresponding electric field at the relevant hydrogen
+                Em  = eproj[chromm];
 
-            // intramolecular coupling
-            else if ( m == n )
-            {
-                kappai[*kappaFill] = chromn; 
-                kappaj[*kappaFill] = chromm;
-                kappa [*kappaFill] = (-1361.0 + 27165*(En + Em))*xn*xm - 1.887*pn*pm;
-                *kappaFill += 1;
-            }
+                // also get the relevent x and p from the map
+                wm  = 3760.2 - 3541.7*Em - 152677.0*Em*Em;
+                xm  = 0.19285 - 1.7261E-5 * wm;
+                pm  = 1.6466  + 5.7692E-4 * wm;
+                mmuprime = 0.1646 + 11.39*Em + 63.41*Em*Em;
 
-            // intermolecular coupling
-            else
-            {
-                
-                // calculate the distance between dipoles
-                // they are located 0.67 A from the oxygen along the OH bond
-                // tdm position on chromophore n
-                mox[0]  = x[ m*natom_mol ][0];
-                mox[1]  = x[ m*natom_mol ][1];
-                mox[2]  = x[ m*natom_mol ][2];
-                if ( chromm % 2 == 0 )       //HW1
+                // the diagonal energy
+                if ( chromn == chromm )
                 {
-                    mhx[0]  = x[ m*natom_mol + 1 ][0];
-                    mhx[1]  = x[ m*natom_mol + 1 ][1];
-                    mhx[2]  = x[ m*natom_mol + 1 ][2];
-                }
-                else if ( chromm % 2 == 1 )  //HW2
-                {
-                    mhx[0]  = x[ m*natom_mol + 2 ][0];
-                    mhx[1]  = x[ m*natom_mol + 2 ][1];
-                    mhx[2]  = x[ m*natom_mol + 2 ][2];
+                    // Note that this is a flattened 2d array -- subtract high frequency energies to get rid of highly oscillatory parts of the F matrix
+                    kappai[*kappaFill] = chromn; 
+                    kappaj[*kappaFill] = chromm;
+                    kappa [*kappaFill] = wm - avef;
+                    *kappaFill += 1;
                 }
 
-                // The OH unit vector
-                moh[0] = minImage( mhx[0] - mox[0], boxx );
-                moh[1] = minImage( mhx[1] - mox[1], boxy );
-                moh[2] = minImage( mhx[2] - mox[2], boxz );
-                r      = mag3(moh);
-                moh[0] /= r;
-                moh[1] /= r;
-                moh[2] /= r;
-
-                // The location of the TDM and the dipole derivative
-                mmu[0] = minImage( mox[0] + 0.067 * moh[0], boxx );
-                mmu[1] = minImage( mox[1] + 0.067 * moh[1], boxy );
-                mmu[2] = minImage( mox[2] + 0.067 * moh[2], boxz );
-
-                // the distance between TDM on N and on M and convert to unit vector
-                dr[0] = minImage( nmu[0] - mmu[0], boxx );
-                dr[1] = minImage( nmu[1] - mmu[1], boxy );
-                dr[2] = minImage( nmu[2] - mmu[2], boxz );
-                r     = mag3( dr );
-                dr[0] /= r;
-                dr[1] /= r;
-                dr[2] /= r;
-                r     *= bohr_nm; // convert to bohr
-
-                // calculate coupling in wavenumber
-                dipoleCpl = ( dot3( noh, moh ) - 3.0 * dot3( noh, dr ) * 
-                                         dot3( moh, dr ) ) / ( r*r*r ) * 
-                                     xn*xm*nmuprime*mmuprime*cm_hartree;
-
-                // only keep it if it is greater than 1 wavenumber
-                if ( fabs(dipoleCpl) > 1. )
+                // intramolecular coupling
+                else if ( m == n )
                 {
                     kappai[*kappaFill] = chromn; 
                     kappaj[*kappaFill] = chromm;
-                    kappa [*kappaFill] = dipoleCpl;
-                    *kappaFill += 1 ;
+                    kappa [*kappaFill] = (-1361.0 + 27165*(En + Em))*xn*xm - 1.887*pn*pm;
+                    *kappaFill += 1;
                 }
 
-            }// end intramolecular coupling
+                // intermolecular coupling
+                else
+                {
+                
+                    // calculate the distance between dipoles
+                    // they are located 0.67 A from the oxygen along the OH bond
+                    // tdm position on chromophore n
+                    mox[0]  = x[ m*natom_mol ][0];
+                    mox[1]  = x[ m*natom_mol ][1];
+                    mox[2]  = x[ m*natom_mol ][2];
+                    if ( chromm % 2 == 0 )       //HW1
+                    {
+                        mhx[0]  = x[ m*natom_mol + 1 ][0];
+                        mhx[1]  = x[ m*natom_mol + 1 ][1];
+                        mhx[2]  = x[ m*natom_mol + 1 ][2];
+                    }
+                    else if ( chromm % 2 == 1 )  //HW2
+                    {
+                        mhx[0]  = x[ m*natom_mol + 2 ][0];
+                        mhx[1]  = x[ m*natom_mol + 2 ][1];
+                        mhx[2]  = x[ m*natom_mol + 2 ][2];
+                    }
 
-            if (*kappaFill >= kappaFillMax) {
-                printf("kappaFill >= kappaFillMax (=%lld). Aborting!\n", kappaFillMax );
-                exit(EXIT_FAILURE);
+                    // The OH unit vector
+                    moh[0] = minImage( mhx[0] - mox[0], boxx );
+                    moh[1] = minImage( mhx[1] - mox[1], boxy );
+                    moh[2] = minImage( mhx[2] - mox[2], boxz );
+                    r      = mag3(moh);
+                    moh[0] /= r;
+                    moh[1] /= r;
+                    moh[2] /= r;
+
+                    // The location of the TDM and the dipole derivative
+                    mmu[0] = minImage( mox[0] + 0.067 * moh[0], boxx );
+                    mmu[1] = minImage( mox[1] + 0.067 * moh[1], boxy );
+                    mmu[2] = minImage( mox[2] + 0.067 * moh[2], boxz );
+
+                    // the distance between TDM on N and on M and convert to unit vector
+                    dr[0] = minImage( nmu[0] - mmu[0], boxx );
+                    dr[1] = minImage( nmu[1] - mmu[1], boxy );
+                    dr[2] = minImage( nmu[2] - mmu[2], boxz );
+                    r     = mag3( dr );
+                    dr[0] /= r;
+                    dr[1] /= r;
+                    dr[2] /= r;
+                    r     *= bohr_nm; // convert to bohr
+
+                    // calculate coupling in wavenumber
+                    dipoleCpl = ( dot3( noh, moh ) - 3.0 * dot3( noh, dr ) * 
+                                             dot3( moh, dr ) ) / ( r*r*r ) * 
+                                         xn*xm*nmuprime*mmuprime*cm_hartree;
+
+                    // only keep it if it is greater than 1 wavenumber
+                    if ( fabs(dipoleCpl) > 1. )
+                    {
+                        kappai[*kappaFill] = chromn; 
+                        kappaj[*kappaFill] = chromm;
+                        kappa [*kappaFill] = dipoleCpl;
+                        *kappaFill += 1 ;
+                    }
+
+                }// end intramolecular coupling
+
+                if (*kappaFill >= kappaFillMax) {
+                    printf("kappaFill >= kappaFillMax (=%lld). Aborting!\n", kappaFillMax );
+                    exit(EXIT_FAILURE);
+                }
             }
-        }// end loop over chromm
-    }// end loop over reference
+        }
+    }
+ 
 }
 
 
@@ -882,7 +941,7 @@ user_real_t dot3( user_real_t x[3], user_real_t y[3] )
 // parse input file to setup calculation
 void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[], user_real_t *dt, int *ntcfpoints, 
               int *nsamples, int *sampleEvery, user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
-              int *nzeros, user_real_t *beginTime )
+              int *nzeros, user_real_t *beginTime, user_real_t *cplCut, int *maxCouple )
 {
     char                para[MAX_STR_LEN];
     char                value[MAX_STR_LEN];
@@ -938,6 +997,10 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
         {
             sscanf( value, "%d", (int *) nzeros );
         }
+        else if ( strcmp(para,"maxCouple") == 0 )
+        {
+            sscanf( value, "%d", (int *) maxCouple );
+        }
 #ifdef USE_DOUBLES
         else if ( strcmp(para,"dt") == 0 )
         {
@@ -955,6 +1018,10 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
         {
             sscanf( value, "%lf", beginTime );
         }
+        else if ( strcmp(para,"cplCut") == 0 )
+        {
+            sscanf( value, "%lf", cplCut );
+        }
 #else
         else if ( strcmp(para,"dt") == 0 )
         {
@@ -971,6 +1038,10 @@ void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[],
         else if ( strcmp(para,"beginTime") == 0 )
         {
             sscanf( value, "%f", beginTime );
+        }
+        else if ( strcmp(para,"cplCut") == 0 )
+        {
+            sscanf( value, "%f", cplCut );
         }
 #endif
         else
@@ -1000,7 +1071,8 @@ void printProgress( int currentStep, int totalSteps )
 void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model[], user_real_t *dt, int *ntcfpoints, 
                  int *nsamples, int *sampleEvery, user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
                  int *nzeros, user_real_t *beginTime, int nchrom, int *currentSample, int *currentFrame, user_complex_t *tcf, 
-                 user_complex_t *cmux0, user_complex_t *cmuy0, user_complex_t *cmuz0, int RWI_FLAG )
+                 user_complex_t *cmux0, user_complex_t *cmuy0, user_complex_t *cmuz0, user_real_t *cplCut, int *maxCouple, 
+                 int RWI_FLAG )
 {
 
     FILE *cptfp;                // checkpoint file pointer
@@ -1028,11 +1100,14 @@ void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model
         fwrite( natom_mol   , sizeof(int)           , 1, cptfp );         // atoms per molecule
         fwrite( nchrom_mol  , sizeof(int)           , 1, cptfp );         // chromophores per molecule
         fwrite( nzeros      , sizeof(int)           , 1, cptfp );         // number of zeros to pad the tcf before FT
+        fwrite( maxCouple   , sizeof(int)           , 1, cptfp );         // maximum number of coupled molecules
 
         fwrite( t1          , sizeof(user_real_t)   , 1, cptfp );         // relaxation time
         fwrite( dt          , sizeof(user_real_t)   , 1, cptfp );         // timestep
         fwrite( avef        , sizeof(user_real_t)   , 1, cptfp );         // average frequency
         fwrite( beginTime   , sizeof(user_real_t)   , 1, cptfp );         // time to start taking samples
+        fwrite( cplCut      , sizeof(user_real_t)   , 1, cptfp );         // cutoff for coupling calc in nm
+
 
         // Write the current configuration
         fwrite( currentSample,  sizeof(int)         , 1, cptfp );         // current sample number
@@ -1072,11 +1147,13 @@ void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model
                 fread( natom_mol   , sizeof(int)           , 1, cptfp );         // atoms per molecule
                 fread( nchrom_mol  , sizeof(int)           , 1, cptfp );         // chromophores per molecule
                 fread( nzeros      , sizeof(int)           , 1, cptfp );         // number of zeros to pad the tcf before FT -- TODO: Doesn't need to be the same
+                fread( maxCouple   , sizeof(int)           , 1, cptfp );         // maximum number of coupled molecules
 
                 fread( t1          , sizeof(user_real_t)   , 1, cptfp );         // relaxation time -- TODO: Doesn't need to be the same
                 fread( dt          , sizeof(user_real_t)   , 1, cptfp );         // timestep
                 fread( avef        , sizeof(user_real_t)   , 1, cptfp );         // average frequency
                 fread( beginTime   , sizeof(user_real_t)   , 1, cptfp );         // time to start taking samples
+                fread( cplCut      , sizeof(user_real_t)   , 1, cptfp );         // cutoff for coupling calc in nm
 
                 // close the file 
                 fclose(cptfp);
@@ -1089,7 +1166,7 @@ void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model
                 cptfp = fopen(argv[1],"rb");
     
                 // skip bytes containing simulation parameters
-                fseek( cptfp, 4*MAX_STR_LEN + 6 * sizeof(int) + 4 * sizeof(user_real_t), SEEK_SET );
+                fseek( cptfp, 4*MAX_STR_LEN + 7 * sizeof(int) + 5 * sizeof(user_real_t), SEEK_SET );
 
                 // Write the current configuration
                 fread( currentSample,  sizeof(int)         , 1, cptfp );         // current sample number

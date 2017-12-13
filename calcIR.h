@@ -47,12 +47,16 @@ typedef float complex user_complex_t;
 // FUNCTIONS
 
 void get_eproj( rvec *x, float boxx, float boxy, float boxz, int natoms, int natom_mol, 
-                int nchrom, int nchrom_mol, int nmol, int model, user_real_t *eproj);
+                int nchrom, int nchrom_mol, int nmol, int model, user_real_t *eproj, 
+                int *nlisti, int *nlistj, long long int *nlistFill, long long int nlistFillMax,
+                user_real_t cplCut );
+
 
 void get_kappa_sparse( rvec *x, float boxx, float boxy, float boxz, int natoms, int natom_mol, 
                        int nchrom, int nchrom_mol, int nmol, user_real_t *eproj, user_real_t *kappa, 
                        user_complex_t *mux, user_complex_t *muy, user_complex_t *muz, user_real_t avef, 
-                       long long int *kappaFill, long long int kappaFillMax, int *kappai, int *kappaj );
+                       long long int *kappaFill, long long int kappaFillMax, int *kappai, int *kappaj,
+                       int *nlisti, int *nlistj, long long int nlistFill );
 
 user_real_t minImage( user_real_t dx, user_real_t boxl );
 
@@ -64,7 +68,8 @@ user_real_t dot3( user_real_t x[3], user_real_t y[3] );
 void ir_init( char *argv[], char gmxf[], char cptf[], char outf[], char model[], 
               user_real_t *dt, int *ntcfpoints,  int *nsamples, 
               int *sampleEvery, user_real_t *t1, user_real_t *avef,
-              int *natom_mol, int *nchrom_mol, int *nzeros, user_real_t *beginTime);
+              int *natom_mol, int *nchrom_mol, int *nzeros, user_real_t *beginTime,
+              user_real_t *cplCut, int *maxCouple );
 
 void printProgress( int currentStep, int totalSteps );
 
@@ -73,7 +78,8 @@ void checkpoint( char *argv[], char gmxf[], char cptf[], char outf[], char model
                  user_real_t *t1, user_real_t *avef, int *natom_mol, int *nchrom_mol, 
                  int *nzeros, user_real_t *beginTime, int nchrom, int *currentSample, 
                  int *currentFrame, user_complex_t *tcf, user_complex_t *cmux0, 
-                 user_complex_t *cmuy0, user_complex_t *cmuz0, int RWI_FLAG );
+                 user_complex_t *cmuy0, user_complex_t *cmuz0, user_real_t *cplCut,
+                 int *maxCouple, int RWI_FLAG );
 
 void signal_handler( int sig );
 #endif
