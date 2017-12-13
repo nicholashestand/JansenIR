@@ -308,7 +308,6 @@ int main(int argc, char *argv[])
                         jj = kappaj[i];
                         if ( ii == jj ) {                  // if this is a diagonal element, plug it in to the relevant part of A0
                             A0_2[ ii ] = cexp(-0.5*I*dt/HBAR * kappa[i] );
-                            //A0_2[ ii ] = cexp(0.5 * I * dt / HBAR * kappa[i] );
                         }
                     }
 
@@ -397,7 +396,7 @@ int main(int argc, char *argv[])
     xdrfile_close(trj);
 
 
-    // reduce tcf to root
+    // reduce tcf to root -- MPI has not complex data type so I have to split this into reals for reduction
     user_real_t *rtcfa, *itcfa, *rtcfsum, *itcfsum;
     rtcfa   = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( rtcf    == NULL )    MALLOC_ERR;
     itcfa   = ( user_real_t *) calloc( ntcfpoints, sizeof( user_real_t ) ); if ( itcf    == NULL )    MALLOC_ERR;
